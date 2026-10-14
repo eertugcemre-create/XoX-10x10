@@ -1,0 +1,857 @@
+<!DOCTYPE html>
+<html lang="tr" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>10x10 Online Özel Kurallı X-O Game</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        slate: {
+                            850: '#131b2e',
+                            950: '#090d16'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    
+    <!-- Firebase App & Realtime Database SDKs -->
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.8.0/firebase-database-compat.js"></script>
+
+    <style>
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            touch-action: manipulation;
+        }
+        .board-grid {
+            display: grid;
+            grid-template-columns: repeat(10, minmax(0, 1fr));
+            gap: 3px;
+        }
+        @media (min-width: 640px) {
+            .board-grid {
+                gap: 5px;
+            }
+        }
+        .cell-btn {
+            aspect-ratio: 1 / 1;
+            transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .cell-btn:hover:not(:disabled) {
+            transform: scale(0.95);
+        }
+        .cell-btn:active:not(:disabled) {
+            transform: scale(0.90);
+        }
+        .glass-panel {
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .turn-active {
+            box-shadow: 0 0 20px rgba(99, 102, 241, 0.35);
+        }
+        @keyframes pulse-ring {
+            0% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(245, 158, 11, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+        }
+        .win-cell {
+            animation: pulse-ring 1.5s infinite;
+        }
+    </style>
+</head>
+<body class="bg-slate-950 text-slate-100 min-h-screen flex flex-col justify-between selection:bg-indigo-500 selection:text-white">
+
+    <!-- Header Navbar -->
+    <header class="border-b border-slate-800/80 bg-slate-900/70 backdrop-blur-md sticky top-0 z-30">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-indigo-600 via-violet-600 to-pink-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                    <i class="fa-solid fa-globe text-white text-lg"></i>
+                </div>
+                <div>
+                    <h1 class="text-base sm:text-lg font-extrabold bg-gradient-to-r from-white via-slate-200 to-indigo-300 bg-clip-text text-transparent">
+                        10x10 Online X-O Game
+                    </h1>
+                    <p class="text-xs text-slate-400 hidden sm:block">Özel Kurallar & Canlı Çok Oyunculu Mod</p>
+                </div>
+            </div>
+
+            <div class="flex items-center gap-2 sm:gap-3">
+                <button id="rulesModalBtn" class="flex items-center gap-2 px-3 py-2 text-xs sm:text-sm font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 rounded-lg border border-slate-700 transition">
+                    <i class="fa-solid fa-book-open text-indigo-400"></i>
+                    <span class="hidden xs:inline">Kurallar</span>
+                </button>
+                <button id="undoBtn" class="flex items-center gap-1.5 px-3 py-2 text-xs sm:text-sm font-semibold text-slate-300 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 disabled:cursor-not-allowed rounded-lg border border-slate-700 transition">
+                    <i class="fa-solid fa-rotate-left text-amber-400"></i>
+                    <span>Geri Al</span>
+                </button>
+                <button id="quickResetBtn" class="flex items-center gap-2 px-3 py-2 text-xs sm:text-sm font-semibold text-white bg-indigo-600 hover:bg-indigo-500 rounded-lg shadow-md shadow-indigo-600/20 transition">
+                    <i class="fa-solid fa-rotate-right"></i>
+                    <span class="hidden sm:inline">Yeniden Başlat</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Game Section -->
+    <main class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 w-full flex-grow flex flex-col lg:flex-row gap-6 items-start">
+        
+        <!-- Sidebar Controls & Scoreboard -->
+        <div class="w-full lg:w-80 flex flex-col gap-5 shrink-0">
+            
+            <!-- Game Mode Switcher -->
+            <div class="glass-panel p-2 rounded-2xl grid grid-cols-3 gap-1">
+                <button id="modePVP" class="py-2 px-2 rounded-xl font-bold text-[11px] sm:text-xs flex flex-col items-center justify-center gap-1 bg-indigo-600 text-white transition shadow-md">
+                    <i class="fa-solid fa-user-group text-xs"></i> 2 Kişilik
+                </button>
+                <button id="modeAI" class="py-2 px-2 rounded-xl font-bold text-[11px] sm:text-xs flex flex-col items-center justify-center gap-1 bg-slate-900 text-slate-400 hover:text-white transition">
+                    <i class="fa-solid fa-robot text-xs"></i> Bot'a Karşı
+                </button>
+                <button id="modeOnline" class="py-2 px-2 rounded-xl font-bold text-[11px] sm:text-xs flex flex-col items-center justify-center gap-1 bg-slate-900 text-slate-400 hover:text-white transition relative">
+                    <span class="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                        <span class="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                        <span class="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                    </span>
+                    <i class="fa-solid fa-globe text-xs"></i> Canlı Online
+                </button>
+            </div>
+
+            <!-- Online Room Control Panel (Hidden by default) -->
+            <div id="onlinePanel" class="hidden glass-panel p-4 rounded-2xl border border-indigo-500/30 space-y-3">
+                <div class="flex items-center justify-between border-b border-slate-800 pb-2">
+                    <span class="text-xs font-extrabold uppercase text-indigo-400 tracking-wider flex items-center gap-1.5">
+                        <i class="fa-solid fa-tower-broadcast animate-pulse"></i> Online Lobi
+                    </span>
+                    <span id="onlineRoleBadge" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-400">Çevrimdışı</span>
+                </div>
+
+                <!-- Create or Join Buttons -->
+                <div id="onlineLobbyActions" class="space-y-2">
+                    <button id="createRoomBtn" class="w-full py-2.5 px-3 text-xs font-bold bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl shadow-lg shadow-indigo-600/20 transition flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-plus"></i> Yeni Oda Oluştur
+                    </button>
+                    
+                    <div class="flex gap-2">
+                        <input id="roomCodeInput" type="text" maxlength="6" placeholder="Oda Kodu (örn: 123456)" class="w-full bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-xs text-center font-mono font-bold uppercase text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500">
+                        <button id="joinRoomBtn" class="px-4 py-2 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-xl border border-slate-700 transition shrink-0">
+                            Katıl
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Active Room Info (When inside room) -->
+                <div id="activeRoomInfo" class="hidden space-y-2 bg-slate-900/80 p-3 rounded-xl border border-slate-800">
+                    <div class="flex justify-between items-center text-xs">
+                        <span class="text-slate-400">Oda Kodu:</span>
+                        <span id="displayRoomCode" class="font-mono font-black text-indigo-400 text-sm tracking-widest">------</span>
+                    </div>
+                    <button id="copyRoomCodeBtn" class="w-full py-1.5 px-2 text-[11px] font-bold bg-slate-800 hover:bg-slate-700 text-indigo-300 rounded-lg transition flex items-center justify-center gap-1.5">
+                        <i class="fa-solid fa-copy"></i> Oda Kodunu Kopyala
+                    </button>
+                    <button id="leaveRoomBtn" class="w-full py-1 px-2 text-[10px] font-semibold text-rose-400 hover:text-rose-300 transition text-center">
+                        Odadan Ayrıl
+                    </button>
+                </div>
+            </div>
+
+            <!-- Current Turn & Scores -->
+            <div class="glass-panel p-5 rounded-2xl shadow-xl relative overflow-hidden">
+                <div class="flex justify-between items-center mb-4">
+                    <span class="text-xs font-extrabold uppercase tracking-wider text-slate-400">Sıradaki Hamle</span>
+                    <span id="turnCounter" class="text-xs font-semibold px-2.5 py-1 rounded-full bg-slate-800 text-slate-300 border border-slate-700">Hamle #1</span>
+                </div>
+
+                <div class="grid grid-cols-2 gap-3">
+                    <!-- Player X -->
+                    <div id="playerXCard" class="flex flex-col items-center p-3 rounded-xl bg-slate-900/80 border border-slate-800 transition-all duration-300">
+                        <div class="w-10 h-10 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400 font-black text-xl mb-1">
+                            X
+                        </div>
+                        <span id="playerXName" class="text-xs font-bold text-slate-200 truncate max-w-full">Oyuncu 1</span>
+                        <span id="playerXWins" class="text-xs text-cyan-400 font-extrabold mt-1">0 Galibiyet</span>
+                    </div>
+
+                    <!-- Player O -->
+                    <div id="playerOCard" class="flex flex-col items-center p-3 rounded-xl bg-slate-900/80 border border-slate-800 transition-all duration-300">
+                        <div class="w-10 h-10 rounded-lg bg-rose-500/10 border border-rose-500/30 flex items-center justify-center text-rose-400 font-black text-xl mb-1">
+                            O
+                        </div>
+                        <span id="playerOName" class="text-xs font-bold text-slate-200 truncate max-w-full">Oyuncu 2</span>
+                        <span id="playerOWins" class="text-xs text-rose-400 font-extrabold mt-1">0 Galibiyet</span>
+                    </div>
+                </div>
+
+                <!-- Status Banner -->
+                <div id="statusMessage" class="mt-4 p-3 rounded-xl text-center font-semibold text-xs bg-indigo-950/40 border border-indigo-800/40 text-indigo-300">
+                    Sıra Oyuncu 1'de (X)
+                </div>
+            </div>
+
+            <!-- Custom Win Rules Summary -->
+            <div class="glass-panel p-5 rounded-2xl shadow-xl">
+                <h3 class="text-xs font-extrabold uppercase tracking-wider text-slate-400 mb-3 flex items-center gap-2">
+                    <i class="fa-solid fa-trophy text-amber-400"></i> Kazanma Kuralları
+                </h3>
+                <div class="space-y-2 text-xs">
+                    <div class="p-2 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center gap-2.5">
+                        <div class="w-7 h-7 rounded-lg bg-indigo-500/10 border border-indigo-500/30 flex items-center justify-center text-indigo-400 font-bold shrink-0">5</div>
+                        <div class="font-semibold text-slate-300">5'li Yan Yana (Yatay)</div>
+                    </div>
+                    <div class="p-2 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center gap-2.5">
+                        <div class="w-7 h-7 rounded-lg bg-violet-500/10 border border-violet-500/30 flex items-center justify-center text-violet-400 font-bold shrink-0">6</div>
+                        <div class="font-semibold text-slate-300">6'lı Çapraz Hat</div>
+                    </div>
+                    <div class="p-2 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center gap-2.5">
+                        <div class="w-7 h-7 rounded-lg bg-pink-500/10 border border-pink-500/30 flex items-center justify-center text-pink-400 font-bold shrink-0">L</div>
+                        <div class="font-semibold text-slate-300">6 Hücreli L Harfi</div>
+                    </div>
+                    <div class="p-2 rounded-xl bg-slate-900/60 border border-slate-800 flex items-center gap-2.5">
+                        <div class="w-7 h-7 rounded-lg bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400 shrink-0"><i class="fa-solid fa-vector-square"></i></div>
+                        <div class="font-semibold text-slate-300">6 Hücreli Dikdörtgen (2x3 / 3x2)</div>
+                    </div>
+                </div>
+            </div>
+
+            <button id="clearScoresBtn" class="w-full py-2 px-3 text-xs font-semibold text-slate-400 hover:text-rose-400 bg-slate-900/60 hover:bg-rose-950/20 border border-slate-800 rounded-xl transition flex items-center justify-center gap-2">
+                <i class="fa-solid fa-trash-can"></i> Skorları Sıfırla
+            </button>
+        </div>
+
+        <!-- Center Game Board -->
+        <div class="w-full flex-grow flex flex-col items-center justify-center">
+            <div class="w-full max-w-[620px] glass-panel p-3 sm:p-5 rounded-2xl shadow-2xl relative">
+                
+                <!-- Game Over Overlay -->
+                <div id="gameOverlay" class="hidden absolute inset-0 bg-slate-950/90 backdrop-blur-md rounded-2xl z-20 flex flex-col items-center justify-center p-6 text-center animate-fade-in">
+                    <div id="overlayIconContainer" class="w-16 h-16 rounded-2xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-3xl mb-3">
+                        <i id="overlayIcon" class="fa-solid fa-trophy text-amber-400"></i>
+                    </div>
+                    <h2 id="overlayTitle" class="text-2xl sm:text-3xl font-extrabold text-white mb-1">Oyuncu 1 Kazandı!</h2>
+                    <span id="overlayRuleBadge" class="inline-block px-3 py-1 rounded-full text-xs font-bold bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 mb-4">
+                        Kural: 6'lı L Harfi
+                    </span>
+                    <p id="overlaySubtitle" class="text-xs text-slate-300 mb-6 max-w-xs">Tebrikler! Belirtilen deseni tamamlayarak oyunu kazandınız.</p>
+                    <button id="overlayPlayAgainBtn" class="px-6 py-3 font-bold text-xs sm:text-sm bg-gradient-to-r from-indigo-500 to-violet-600 hover:from-indigo-600 hover:to-violet-700 text-white rounded-xl shadow-lg shadow-indigo-500/30 transition transform hover:-translate-y-0.5">
+                        Yeni Oyun Başlat
+                    </button>
+                </div>
+
+                <!-- 10x10 Board Grid -->
+                <div id="board" class="board-grid w-full aspect-square bg-slate-900/90 p-1.5 sm:p-2 rounded-xl border border-slate-800">
+                    <!-- Dynamic 100 cells -->
+                </div>
+
+            </div>
+        </div>
+    </main>
+
+    <!-- Kural Rehberi Modal -->
+    <div id="rulesModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+        <div class="glass-panel w-full max-w-xl rounded-2xl shadow-2xl border border-slate-800 overflow-hidden flex flex-col max-h-[90vh]">
+            <div class="px-6 py-4 border-b border-slate-800 flex justify-between items-center bg-slate-900/80">
+                <div class="flex items-center gap-2">
+                    <i class="fa-solid fa-book-open text-indigo-400"></i>
+                    <h2 class="text-base font-bold text-white">4 Özel Kazanma Kuralı</h2>
+                </div>
+                <button id="closeModalBtn" class="text-slate-400 hover:text-white w-8 h-8 rounded-lg flex items-center justify-center hover:bg-slate-800 transition">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+            <div class="p-6 overflow-y-auto space-y-4 text-xs text-slate-300">
+                <div class="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                    <div class="font-bold text-white mb-1">1. 5'li Yan Yana (Yatay)</div>
+                    <p class="text-slate-400">Aynı satırda yan yana dizilmiş 5 kesintisiz simge.</p>
+                </div>
+                <div class="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                    <div class="font-bold text-white mb-1">2. 6'lı Çapraz</div>
+                    <p class="text-slate-400">Çapraz doğrultuda 6 kesintisiz aynı simge.</p>
+                </div>
+                <div class="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                    <div class="font-bold text-white mb-1">3. 6 Hücreli L Harfi</div>
+                    <p class="text-slate-400">Köşeyi paylaşan 4x3 veya 3x4 kollu 6 hücreli L deseni.</p>
+                </div>
+                <div class="p-3 rounded-xl bg-slate-900/80 border border-slate-800">
+                    <div class="font-bold text-white mb-1">4. 6 Hücreli Dikdörtgen</div>
+                    <p class="text-slate-400">Dolu 2x3 veya 3x2 boyutlarında 6 karelik blok alan.</p>
+                </div>
+            </div>
+            <div class="px-6 py-3 border-t border-slate-800 bg-slate-900/80 flex justify-end">
+                <button id="closeModalFooterBtn" class="px-4 py-2 text-xs font-bold bg-indigo-600 text-white rounded-lg">Anlaşıldı</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // --- Firebase Initial Setup (Public demo Realtime DB endpoint) ---
+        const firebaseConfig = {
+            databaseURL: "https://tic-tac-toe-10x10-default-rtdb.firebaseio.com/"
+        };
+        
+        let db = null;
+        try {
+            firebase.initializeApp(firebaseConfig);
+            db = firebase.database();
+        } catch (e) {
+            console.warn("Firebase initialized using fallback mode.");
+        }
+
+        const BOARD_SIZE = 10;
+        let boardState = Array(BOARD_SIZE * BOARD_SIZE).fill(null);
+        let moveHistory = [];
+        let currentPlayer = 'X';
+        let turnCount = 1;
+        let isGameActive = true;
+        let gameMode = 'PVP'; // 'PVP', 'AI', 'ONLINE'
+
+        // Online Specific State
+        let currentRoomId = null;
+        let mySymbol = null; // 'X' for host, 'O' for joiner
+        let roomRef = null;
+
+        let scores = { X: 0, O: 0 };
+
+        // DOM elements
+        const boardEl = document.getElementById('board');
+        const turnCounterEl = document.getElementById('turnCounter');
+        const playerXCard = document.getElementById('playerXCard');
+        const playerOCard = document.getElementById('playerOCard');
+        const playerXNameEl = document.getElementById('playerXName');
+        const playerONameEl = document.getElementById('playerOName');
+        const playerXWinsEl = document.getElementById('playerXWins');
+        const playerOWinsEl = document.getElementById('playerOWins');
+        const statusMessageEl = document.getElementById('statusMessage');
+
+        const modePVP = document.getElementById('modePVP');
+        const modeAI = document.getElementById('modeAI');
+        const modeOnline = document.getElementById('modeOnline');
+
+        const onlinePanel = document.getElementById('onlinePanel');
+        const onlineRoleBadge = document.getElementById('onlineRoleBadge');
+        const createRoomBtn = document.getElementById('createRoomBtn');
+        const joinRoomBtn = document.getElementById('joinRoomBtn');
+        const roomCodeInput = document.getElementById('roomCodeInput');
+        const activeRoomInfo = document.getElementById('activeRoomInfo');
+        const onlineLobbyActions = document.getElementById('onlineLobbyActions');
+        const displayRoomCode = document.getElementById('displayRoomCode');
+        const copyRoomCodeBtn = document.getElementById('copyRoomCodeBtn');
+        const leaveRoomBtn = document.getElementById('leaveRoomBtn');
+
+        const undoBtn = document.getElementById('undoBtn');
+        const quickResetBtn = document.getElementById('quickResetBtn');
+        const clearScoresBtn = document.getElementById('clearScoresBtn');
+
+        const rulesModal = document.getElementById('rulesModal');
+        const rulesModalBtn = document.getElementById('rulesModalBtn');
+        const closeModalBtn = document.getElementById('closeModalBtn');
+        const closeModalFooterBtn = document.getElementById('closeModalFooterBtn');
+
+        const gameOverlay = document.getElementById('gameOverlay');
+        const overlayTitle = document.getElementById('overlayTitle');
+        const overlaySubtitle = document.getElementById('overlaySubtitle');
+        const overlayRuleBadge = document.getElementById('overlayRuleBadge');
+        const overlayPlayAgainBtn = document.getElementById('overlayPlayAgainBtn');
+
+        function initGame(resetScores = false) {
+            boardState = Array(BOARD_SIZE * BOARD_SIZE).fill(null);
+            moveHistory = [];
+            currentPlayer = 'X';
+            turnCount = 1;
+            isGameActive = true;
+
+            if (resetScores) scores = { X: 0, O: 0 };
+
+            gameOverlay.classList.add('hidden');
+            updateUI();
+            renderBoard();
+
+            // Sync reset to online room if host
+            if (gameMode === 'ONLINE' && roomRef && mySymbol === 'X') {
+                roomRef.update({
+                    board: JSON.stringify(boardState),
+                    currentPlayer: 'X',
+                    turnCount: 1,
+                    winner: null
+                });
+            }
+        }
+
+        function renderBoard() {
+            boardEl.innerHTML = '';
+            for (let i = 0; i < BOARD_SIZE * BOARD_SIZE; i++) {
+                const btn = document.createElement('button');
+                btn.className = `cell-btn flex items-center justify-center font-black text-xs sm:text-sm md:text-base rounded-md sm:rounded-lg border select-none transition-all duration-200`;
+                btn.dataset.index = i;
+
+                const val = boardState[i];
+                if (val === 'X') {
+                    btn.classList.add('bg-cyan-500/10', 'border-cyan-500/40', 'text-cyan-400');
+                    btn.innerHTML = 'X';
+                } else if (val === 'O') {
+                    btn.classList.add('bg-rose-500/10', 'border-rose-500/40', 'text-rose-400');
+                    btn.innerHTML = 'O';
+                } else {
+                    btn.classList.add('bg-slate-900/60', 'hover:bg-slate-800', 'border-slate-800/80', 'text-transparent');
+                    btn.addEventListener('click', () => handleCellClick(i));
+                }
+
+                boardEl.appendChild(btn);
+            }
+        }
+
+        function handleCellClick(index) {
+            if (!isGameActive || boardState[index] !== null) return;
+
+            // Turn check for online mode
+            if (gameMode === 'ONLINE') {
+                if (currentPlayer !== mySymbol) {
+                    alert("Şu an rakibin sırası!");
+                    return;
+                }
+            }
+
+            boardState[index] = currentPlayer;
+            moveHistory.push(index);
+
+            const winResult = checkAllWinRules(currentPlayer);
+
+            if (winResult) {
+                renderBoard();
+                handleWin(currentPlayer, winResult);
+                if (gameMode === 'ONLINE' && roomRef) {
+                    roomRef.update({
+                        board: JSON.stringify(boardState),
+                        winner: currentPlayer,
+                        winRule: winResult.ruleName
+                    });
+                }
+                return;
+            }
+
+            if (!boardState.includes(null)) {
+                renderBoard();
+                handleDraw();
+                if (gameMode === 'ONLINE' && roomRef) {
+                    roomRef.update({
+                        board: JSON.stringify(boardState),
+                        winner: 'DRAW'
+                    });
+                }
+                return;
+            }
+
+            currentPlayer = currentPlayer === 'X' ? 'O' : 'X';
+            turnCount++;
+            updateUI();
+            renderBoard();
+
+            // Online sync move
+            if (gameMode === 'ONLINE' && roomRef) {
+                roomRef.update({
+                    board: JSON.stringify(boardState),
+                    currentPlayer: currentPlayer,
+                    turnCount: turnCount
+                });
+            }
+
+            // AI turn trigger
+            if (gameMode === 'AI' && currentPlayer === 'O' && isGameActive) {
+                setTimeout(makeAIMove, 300);
+            }
+        }
+
+        // --- ONLINE MULTIPLAYER LOGIC ---
+        function generateRoomCode() {
+            return Math.floor(100000 + Math.random() * 900000).toString();
+        }
+
+        function createOnlineRoom() {
+            if (!db) {
+                alert("Firebase bağlantısı kurulamadı.");
+                return;
+            }
+
+            currentRoomId = generateRoomCode();
+            mySymbol = 'X';
+            roomRef = db.ref('rooms/' + currentRoomId);
+
+            roomRef.set({
+                createdAt: Date.now(),
+                status: 'waiting',
+                board: JSON.stringify(Array(100).fill(null)),
+                currentPlayer: 'X',
+                turnCount: 1,
+                winner: null,
+                hostJoined: true,
+                guestJoined: false
+            });
+
+            setupRoomListener();
+
+            onlineLobbyActions.classList.add('hidden');
+            activeRoomInfo.classList.remove('hidden');
+            displayRoomCode.textContent = currentRoomId;
+            onlineRoleBadge.textContent = "Oda Sahibi (X)";
+            onlineRoleBadge.className = "text-[10px] font-bold px-2 py-0.5 rounded-full bg-cyan-900/60 text-cyan-300 border border-cyan-700/50";
+
+            initGame();
+            statusMessageEl.textContent = "Oda Oluşturuldu! İkinci oyuncu bekleniyor...";
+        }
+
+        function joinOnlineRoom() {
+            const code = roomCodeInput.value.trim();
+            if (code.length !== 6) {
+                alert("Lütfen 6 haneli geçerli bir oda kodu girin!");
+                return;
+            }
+
+            currentRoomId = code;
+            mySymbol = 'O';
+            roomRef = db.ref('rooms/' + currentRoomId);
+
+            roomRef.once('value', (snapshot) => {
+                if (!snapshot.exists()) {
+                    alert("Oda bulunamadı! Kodu kontrol edin.");
+                    return;
+                }
+
+                roomRef.update({
+                    guestJoined: true,
+                    status: 'active'
+                });
+
+                setupRoomListener();
+
+                onlineLobbyActions.classList.add('hidden');
+                activeRoomInfo.classList.remove('hidden');
+                displayRoomCode.textContent = currentRoomId;
+                onlineRoleBadge.textContent = "Rakip (O)";
+                onlineRoleBadge.className = "text-[10px] font-bold px-2 py-0.5 rounded-full bg-rose-900/60 text-rose-300 border border-rose-700/50";
+
+                initGame();
+            });
+        }
+
+        function setupRoomListener() {
+            if (!roomRef) return;
+
+            roomRef.on('value', (snapshot) => {
+                const data = snapshot.val();
+                if (!data) return;
+
+                if (data.board) {
+                    boardState = JSON.parse(data.board);
+                }
+                currentPlayer = data.currentPlayer || 'X';
+                turnCount = data.turnCount || 1;
+
+                if (data.status === 'active' && data.guestJoined && !data.winner) {
+                    statusMessageEl.textContent = `Canlı Maç Başladı! Sıra: ${currentPlayer}`;
+                }
+
+                if (data.winner) {
+                    if (data.winner === 'DRAW') {
+                        handleDraw();
+                    } else if (isGameActive) {
+                        const winRes = checkAllWinRules(data.winner) || { ruleName: data.winRule || "Özel Kural", cells: [] };
+                        handleWin(data.winner, winRes);
+                    }
+                }
+
+                updateUI();
+                renderBoard();
+            });
+        }
+
+        function leaveRoom() {
+            if (roomRef) {
+                roomRef.off();
+                roomRef = null;
+            }
+            currentRoomId = null;
+            mySymbol = null;
+
+            onlineLobbyActions.classList.remove('hidden');
+            activeRoomInfo.classList.add('hidden');
+            onlineRoleBadge.textContent = "Çevrimdışı";
+            onlineRoleBadge.className = "text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-800 text-slate-400";
+
+            initGame();
+        }
+
+        // --- Custom Rules (5 In-a-row, 6 Diagonal, 6 L-Shape, 6 Rectangle) ---
+        function checkAllWinRules(player) {
+            return checkHorizontal5(player) || checkDiagonal6(player) || checkLShape6(player) || checkRect6(player);
+        }
+
+        function checkHorizontal5(player) {
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c <= BOARD_SIZE - 5; c++) {
+                    let matches = [];
+                    for (let k = 0; k < 5; k++) {
+                        const idx = r * BOARD_SIZE + (c + k);
+                        if (boardState[idx] === player) matches.push(idx);
+                        else break;
+                    }
+                    if (matches.length === 5) return { ruleName: "5'li Yan Yana", cells: matches };
+                }
+            }
+            return null;
+        }
+
+        function checkDiagonal6(player) {
+            for (let r = 0; r <= BOARD_SIZE - 6; r++) {
+                for (let c = 0; c <= BOARD_SIZE - 6; c++) {
+                    let matches = [];
+                    for (let k = 0; k < 6; k++) {
+                        const idx = (r + k) * BOARD_SIZE + (c + k);
+                        if (boardState[idx] === player) matches.push(idx);
+                        else break;
+                    }
+                    if (matches.length === 6) return { ruleName: "6'lı Çapraz", cells: matches };
+                }
+            }
+            for (let r = 0; r <= BOARD_SIZE - 6; r++) {
+                for (let c = 5; c < BOARD_SIZE; c++) {
+                    let matches = [];
+                    for (let k = 0; k < 6; k++) {
+                        const idx = (r + k) * BOARD_SIZE + (c - k);
+                        if (boardState[idx] === player) matches.push(idx);
+                        else break;
+                    }
+                    if (matches.length === 6) return { ruleName: "6'lı Çapraz", cells: matches };
+                }
+            }
+            return null;
+        }
+
+        function checkLShape6(player) {
+            const lOrientations = [
+                [[0,0],[1,0],[2,0],[3,0],[0,1],[0,2]],
+                [[0,0],[1,0],[2,0],[3,0],[0,-1],[0,-2]],
+                [[0,0],[-1,0],[-2,0],[-3,0],[0,1],[0,2]],
+                [[0,0],[-1,0],[-2,0],[-3,0],[0,-1],[0,-2]],
+                [[0,0],[1,0],[2,0],[0,1],[0,2],[0,3]],
+                [[0,0],[1,0],[2,0],[0,-1],[0,-2],[0,-3]],
+                [[0,0],[-1,0],[-2,0],[0,1],[0,2],[0,3]],
+                [[0,0],[-1,0],[-2,0],[0,-1],[0,-2],[0,-3]]
+            ];
+            for (let r = 0; r < BOARD_SIZE; r++) {
+                for (let c = 0; c < BOARD_SIZE; c++) {
+                    for (let pattern of lOrientations) {
+                        let matches = [];
+                        let valid = true;
+                        for (let [dr, dc] of pattern) {
+                            const nr = r + dr, nc = c + dc;
+                            if (nr < 0 || nr >= BOARD_SIZE || nc < 0 || nc >= BOARD_SIZE) { valid = false; break; }
+                            const idx = nr * BOARD_SIZE + nc;
+                            if (boardState[idx] === player) matches.push(idx);
+                            else { valid = false; break; }
+                        }
+                        if (valid && matches.length === 6) return { ruleName: "6 Hücreli L Harfi", cells: matches };
+                    }
+                }
+            }
+            return null;
+        }
+
+        function checkRect6(player) {
+            // 2x3
+            for (let r = 0; r <= BOARD_SIZE - 2; r++) {
+                for (let c = 0; c <= BOARD_SIZE - 3; c++) {
+                    let matches = [], valid = true;
+                    for (let dr = 0; dr < 2; dr++) {
+                        for (let dc = 0; dc < 3; dc++) {
+                            const idx = (r + dr) * BOARD_SIZE + (c + dc);
+                            if (boardState[idx] === player) matches.push(idx);
+                            else { valid = false; break; }
+                        }
+                    }
+                    if (valid && matches.length === 6) return { ruleName: "6 Hücreli Dikdörtgen (2x3)", cells: matches };
+                }
+            }
+            // 3x2
+            for (let r = 0; r <= BOARD_SIZE - 3; r++) {
+                for (let c = 0; c <= BOARD_SIZE - 2; c++) {
+                    let matches = [], valid = true;
+                    for (let dr = 0; dr < 3; dr++) {
+                        for (let dc = 0; dc < 2; dc++) {
+                            const idx = (r + dr) * BOARD_SIZE + (c + dc);
+                            if (boardState[idx] === player) matches.push(idx);
+                            else { valid = false; break; }
+                        }
+                    }
+                    if (valid && matches.length === 6) return { ruleName: "6 Hücreli Dikdörtgen (3x2)", cells: matches };
+                }
+            }
+            return null;
+        }
+
+        // --- Smart AI Bot ---
+        function makeAIMove() {
+            if (!isGameActive) return;
+            const emptyIndices = boardState.map((val, idx) => val === null ? idx : null).filter(val => val !== null);
+            if (emptyIndices.length === 0) return;
+
+            let chosen = null;
+            // 1. Can Bot win?
+            for (let idx of emptyIndices) {
+                boardState[idx] = 'O';
+                if (checkAllWinRules('O')) { chosen = idx; boardState[idx] = null; break; }
+                boardState[idx] = null;
+            }
+            // 2. Can Player win? Block!
+            if (chosen === null) {
+                for (let idx of emptyIndices) {
+                    boardState[idx] = 'X';
+                    if (checkAllWinRules('X')) { chosen = idx; boardState[idx] = null; break; }
+                    boardState[idx] = null;
+                }
+            }
+            // 3. Fallback random neighbor
+            if (chosen === null) {
+                chosen = emptyIndices[Math.floor(Math.random() * emptyIndices.length)];
+            }
+
+            handleCellClick(chosen);
+        }
+
+        function handleWin(winner, winResult) {
+            isGameActive = false;
+            scores[winner]++;
+            updateScoresUI();
+
+            const buttons = boardEl.querySelectorAll('.cell-btn');
+            if (winResult && winResult.cells) {
+                winResult.cells.forEach(idx => {
+                    if (buttons[idx]) buttons[idx].classList.add('ring-4', 'ring-amber-400', 'bg-amber-500/30', 'scale-105', 'z-10', 'win-cell');
+                });
+            }
+
+            let winnerName = winner === 'X' ? "Oyuncu 1" : "Oyuncu 2";
+            if (gameMode === 'AI' && winner === 'O') winnerName = "Yapay Zeka";
+            if (gameMode === 'ONLINE') winnerName = winner === mySymbol ? "Sen Kazandın!" : "Rakip Kazandı!";
+
+            statusMessageEl.textContent = `${winnerName} Kazandı! 🎉`;
+
+            setTimeout(() => {
+                overlayTitle.textContent = `${winnerName} Kazandı!`;
+                overlayRuleBadge.textContent = `Kural: ${winResult ? winResult.ruleName : 'Özel Kural'}`;
+                overlaySubtitle.textContent = `Tebrikler! Deseni tamamlayarak galibiyete ulaştınız.`;
+                overlayIcon.className = `fa-solid fa-trophy ${winner === 'X' ? 'text-cyan-400' : 'text-rose-400'}`;
+                gameOverlay.classList.remove('hidden');
+            }, 600);
+        }
+
+        function handleDraw() {
+            isGameActive = false;
+            statusMessageEl.textContent = "Oyun Berabere!";
+            setTimeout(() => {
+                overlayTitle.textContent = "Berabere!";
+                overlayRuleBadge.textContent = "Tüm Hücreler Doldu";
+                gameOverlay.classList.remove('hidden');
+            }, 600);
+        }
+
+        function updateUI() {
+            turnCounterEl.textContent = `Hamle #${turnCount}`;
+            undoBtn.disabled = moveHistory.length === 0 || !isGameActive || gameMode === 'ONLINE';
+
+            if (gameMode === 'ONLINE') {
+                playerXNameEl.textContent = mySymbol === 'X' ? "Sen (X)" : "Rakip (X)";
+                playerONameEl.textContent = mySymbol === 'O' ? "Sen (O)" : "Rakip (O)";
+            } else {
+                playerXNameEl.textContent = "Oyuncu 1";
+                playerONameEl.textContent = gameMode === 'AI' ? "Yapay Zeka" : "Oyuncu 2";
+            }
+
+            if (currentPlayer === 'X') {
+                playerXCard.classList.add('turn-active', 'border-indigo-500/80');
+                playerOCard.classList.remove('turn-active', 'border-indigo-500/80');
+            } else {
+                playerOCard.classList.add('turn-active', 'border-indigo-500/80');
+                playerXCard.classList.remove('turn-active', 'border-indigo-500/80');
+            }
+        }
+
+        function updateScoresUI() {
+            playerXWinsEl.textContent = `${scores.X} Galibiyet`;
+            playerOWinsEl.textContent = `${scores.O} Galibiyet`;
+        }
+
+        // Mode Switching
+        modePVP.addEventListener('click', () => {
+            gameMode = 'PVP';
+            onlinePanel.classList.add('hidden');
+            modePVP.className = "py-2 px-2 rounded-xl font-bold text-[11px] sm:text-xs flex flex-col items-center justify-center gap-1 bg-indigo-600 text-white transition shadow-md";
+            modeAI.className = modeOnline.className = "py-2 px-2 rounded-xl font-bold text-[11px] sm:text-xs flex flex-col items-center justify-center gap-1 bg-slate-900 text-slate-400 hover:text-white transition";
+            initGame();
+        });
+
+        modeAI.addEventListener('click', () => {
+            gameMode = 'AI';
+            onlinePanel.classList.add('hidden');
+            modeAI.className = "py-2 px-2 rounded-xl font-bold text-[11px] sm:text-xs flex flex-col items-center justify-center gap-1 bg-indigo-600 text-white transition shadow-md";
+            modePVP.className = modeOnline.className = "py-2 px-2 rounded-xl font-bold text-[11px] sm:text-xs flex flex-col items-center justify-center gap-1 bg-slate-900 text-slate-400 hover:text-white transition";
+            initGame();
+        });
+
+        modeOnline.addEventListener('click', () => {
+            gameMode = 'ONLINE';
+            onlinePanel.classList.remove('hidden');
+            modeOnline.className = "py-2 px-2 rounded-xl font-bold text-[11px] sm:text-xs flex flex-col items-center justify-center gap-1 bg-indigo-600 text-white transition shadow-md";
+            modePVP.className = modeAI.className = "py-2 px-2 rounded-xl font-bold text-[11px] sm:text-xs flex flex-col items-center justify-center gap-1 bg-slate-900 text-slate-400 hover:text-white transition";
+            initGame();
+        });
+
+        // Online Handlers
+        createRoomBtn.addEventListener('click', createOnlineRoom);
+        joinRoomBtn.addEventListener('click', joinOnlineRoom);
+        leaveRoomBtn.addEventListener('click', leaveRoom);
+        copyRoomCodeBtn.addEventListener('click', () => {
+            if (currentRoomId) {
+                document.execCommand('copy');
+                navigator.clipboard.writeText(currentRoomId);
+                alert(`Oda Kodu (${currentRoomId}) kopyalandı! Arkadaşınıza iletebilirsiniz.`);
+            }
+        });
+
+        // General Handlers
+        rulesModalBtn.addEventListener('click', () => rulesModal.classList.remove('hidden'));
+        closeModalBtn.addEventListener('click', () => rulesModal.classList.add('hidden'));
+        closeModalFooterBtn.addEventListener('click', () => rulesModal.classList.add('hidden'));
+
+        undoBtn.addEventListener('click', () => {
+            if (moveHistory.length > 0 && gameMode !== 'ONLINE') {
+                const last = moveHistory.pop();
+                boardState[last] = null;
+                currentPlayer = currentPlayer === 'X' ? 'O' : 'X';
+                turnCount--;
+                updateUI();
+                renderBoard();
+            }
+        });
+
+        quickResetBtn.addEventListener('click', () => initGame());
+        overlayPlayAgainBtn.addEventListener('click', () => initGame());
+        clearScoresBtn.addEventListener('click', () => initGame(true));
+
+        window.onload = function() {
+            initGame();
+        };
+    </script>
+</body>
+</html>
